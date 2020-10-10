@@ -21,14 +21,14 @@ export const HomePage = ({navigation}) => {
         });
       }
     });
-  }, [socket, roomId, username]);
+  }, [socket, roomId, username, navigation]);
 
   const createRoom = () => {
     socket.emit('CREATE_ROOM', {roomId: `ROOM#${roomId}`, username});
   };
 
   const joinRoom = () => {
-    socket.emit('ROOM_EXISTS', {roomId: `ROOM#${roomId}`});
+    socket.emit('ROOM_EXISTS', {roomId: `ROOM#${roomId}`, username});
   };
 
   return (
