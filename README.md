@@ -3,12 +3,15 @@
 Pictionary Game - Using React Native/NodeJS/Socket.io
 
 ### - Creating a socket connection
+
 ![](preview-gif/creating-socket-connection.gif)
 
 ### - Multiple users connecting to the same room
+
 ![](preview-gif/joining-same-room.gif)
 
 ### - Drawing (Please ignore my art skills)
+
 ![](preview-gif/drawing.gif)
 
 How to run:
@@ -30,6 +33,8 @@ How to run:
   npm start
   npm run android
 ```
+
+Download APK : [Download](apk/Pictionary.apk)
 
 ##### Currently no DB is being used and everything is being done in memory (Reload the backend and whooosh)
 
