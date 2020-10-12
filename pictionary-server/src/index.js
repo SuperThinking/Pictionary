@@ -155,13 +155,16 @@ io.on("connection", (socket) => {
 
   // CHECK IF ROOM EXISTS BEFORE JOINING
   socket.on("ROOM_EXISTS", ({ roomId }) => {
-    if (roomId in rooms) {
+    if (roomId in rooms && rooms[roomId]["hasStarted"] != true) {
       socket.emit(
         roomId,
         createEvent(Status.SUCCESS, "Connecting you to room")
       );
     } else {
-      socket.emit(roomId, createEvent(Status.ROOM_404, "Invalid Room ID"));
+      socket.emit(
+        roomId,
+        createEvent(Status.ROOM_404, "Invalid Room ID/Game has started")
+      );
     }
   });
 
