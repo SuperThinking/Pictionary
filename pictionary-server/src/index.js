@@ -4,6 +4,8 @@ const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io").listen(server);
 const port = 3000;
+const TURN_DURATION = 30; // 30 seconds
+const PAUSE_DURATION = 2; // 2 second pause
 
 var rooms = {};
 
@@ -47,10 +49,12 @@ const createEvent = (status, payload) => {
 const createUser = (id, username, roomId) => {
   const user = { username: username, score: 0, id, turns: 0 };
   rooms[roomId]["users"].push(user);
+  console.log(`${username} joined ${roomId}`);
   return user;
 };
 
-const createRoom = (roomId) => {
+const createRoom = (roomId, username) => {
+  console.log(`${username} created ${roomId}`);
   rooms[roomId] = {
     users: [],
     word: null,
@@ -62,8 +66,8 @@ const createRoom = (roomId) => {
 
 const removeUser = (id, roomId) => {
   const index = rooms[roomId]["users"].findIndex((user) => user.id === id);
-
   if (index !== -1) {
+    console.log(`${rooms[roomId]["users"][index].username} left ${roomId}`);
     return rooms[roomId]["users"].splice(index, 1)[0];
   }
 };
@@ -88,7 +92,9 @@ io.on("connection", (socket) => {
   // TAKES CARE OF TURNS AND GENERATE WORDS
   socket.on("TURN", ({ roomId }) => {
     if (rooms[roomId].timer === null) {
-      rooms[roomId].timer = setInterval(() => {
+      rooms[roomId].timer = setInterval(async () => {
+        io.to(roomId).emit("CLEAR_INTERVAL");
+        await new Promise((r) => setTimeout(r, PAUSE_DURATION));
         const index = rooms[roomId]["users"].findIndex(
           (user) => user.id === socket.id
         );
@@ -98,8 +104,9 @@ io.on("connection", (socket) => {
         io.to(roomId).emit("TURN", {
           word,
           id,
+          turnInterval: TURN_DURATION,
         });
-      }, 30000);
+      }, (TURN_DURATION + PAUSE_DURATION) * 1000);
     }
     const index = rooms[roomId]["users"].findIndex(
       (user) => user.id === socket.id
@@ -110,6 +117,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("TURN", {
       word,
       id,
+      turnInterval: TURN_DURATION,
     });
   });
 
@@ -142,10 +150,10 @@ io.on("connection", (socket) => {
     if (roomId in rooms) {
       socket.emit(
         roomId,
-        createEvent(Status.ERROR, "Room with this ID already exists")
+        createEvent(Status.ERROR, "Room with this id already exists")
       );
     } else {
-      createRoom(roomId);
+      createRoom(roomId, username);
       socket.emit(
         roomId,
         createEvent(Status.SUCCESS, "Room created successfully")
@@ -160,10 +168,15 @@ io.on("connection", (socket) => {
         roomId,
         createEvent(Status.SUCCESS, "Connecting you to room")
       );
+    } else if (!(roomId in rooms)) {
+      socket.emit(
+        roomId,
+        createEvent(Status.ROOM_404, `Room with this id does not exist`)
+      );
     } else {
       socket.emit(
         roomId,
-        createEvent(Status.ROOM_404, "Invalid Room ID/Game has started")
+        createEvent(Status.ERROR, "Game has already started")
       );
     }
   });
