@@ -19,6 +19,8 @@ export const HomePage = ({navigation}) => {
           username,
           roomId: `ROOM#${roomId}`,
         });
+      } else if (event.status === 'ERROR' || event.status === 'ROOM_404') {
+        alert(event.payload);
       }
     });
   }, [socket, roomId, username, navigation]);

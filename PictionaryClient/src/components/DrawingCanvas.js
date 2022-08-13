@@ -1,6 +1,7 @@
 import {SketchCanvas} from '@terrylinla/react-native-sketch-canvas';
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  Animated,
   View,
   Text,
   StyleSheet,
@@ -19,9 +20,13 @@ export const DrawingCanvas = ({navigation, route}) => {
   const [currentPath, setCurrentPath] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const {roomId, username} = route.params;
-  const [word, setWord] = useState('');
-  const [score, setScore] = useState(0);
   const [disableTextInput, setDisableTextInput] = useState(true);
+  const [gameConfig, setGameConfig] = useState({
+    word: '',
+    score: 0,
+    totalDuration: null,
+  });
+  const [remainingTime, setRemainingTime] = useState(null);
 
   useEffect(() => {
     socket.emit('TURN', {
@@ -30,18 +35,35 @@ export const DrawingCanvas = ({navigation, route}) => {
   }, []);
 
   useEffect(() => {
-    socket.on('TURN', ({word, id}) => {
+    if (remainingTime && remainingTime > 0) {
+      const timer = setInterval(() => {
+        setRemainingTime((time) => time - 1);
+      }, 1000);
+      return () => {
+        clearInterval(timer);
+      };
+    }
+  }, [remainingTime]);
+
+  useEffect(() => {
+    socket.on('TURN', ({word, id, turnInterval}) => {
       setDisableTextInput(true);
+      setRemainingTime(turnInterval);
       if (socket.id === id) {
         setIsDrawing(true);
       } else {
         setIsDrawing(false);
       }
-      setWord(word);
-      canvas.current.clear();
-      setPathIds([]);
+      setGameConfig({...gameConfig, word: word, totalDuration: turnInterval});
+      clearBoard();
       setCurrentPath([]);
       setCurrentPathId(0);
+    });
+  }, [socket]);
+
+  useEffect(() => {
+    socket.on('RESET_INTERVAL', () => {
+      clearInterval();
     });
   }, [socket]);
 
@@ -51,9 +73,9 @@ export const DrawingCanvas = ({navigation, route}) => {
         setDisableTextInput(false);
         Alert.alert(`CORRECT GUESS!`);
       } else {
-        Alert.alert(`ERRR, TRY AGAIN!`);
+        Alert.alert(`NOPE, TRY AGAIN!`);
       }
-      setScore(payload.score);
+      setGameConfig({...gameConfig, score: payload.score});
     });
   }, [socket]);
 
@@ -92,6 +114,20 @@ export const DrawingCanvas = ({navigation, route}) => {
       }),
     [navigation],
   );
+
+  const barWidth = useRef(new Animated.Value(0)).current;
+  const progressPercent = barWidth.interpolate({
+    inputRange: [0, gameConfig.totalDuration],
+    outputRange: ['0%', `100%`],
+  });
+
+  useEffect(() => {
+    Animated.timing(barWidth, {
+      duration: 1000,
+      toValue: remainingTime,
+      useNativeDriver: false,
+    }).start();
+  }, [remainingTime]);
 
   const coordinatesToPathDataString = (xy) => {
     return `${xy.x},${xy.y}`;
@@ -176,17 +212,24 @@ export const DrawingCanvas = ({navigation, route}) => {
         }}>
         <View style={styles.headers}>
           {isDrawing ? (
-            <Text style={styles.headerText}>Draw: {word}</Text>
+            <Text style={styles.headerText}>Draw: {gameConfig.word}</Text>
           ) : (
             <Text style={styles.headerText}>
-              {`Guess: ${word.length} letter word`}
+              {`Guess: ${gameConfig.word.length} letter word`}
             </Text>
           )}
         </View>
         <View style={styles.headers}>
-          <Text style={styles.headerText}>{`Points: ${score}`}</Text>
+          <Text style={styles.headerText}>{`Points: ${gameConfig.score}`}</Text>
         </View>
       </View>
+      <Animated.View
+        style={{
+          backgroundColor: '#e3e1da',
+          width: progressPercent,
+          height: 5,
+        }}
+      />
       <View style={{flex: 1, flexDirection: 'row'}}>
         <SketchCanvas
           ref={canvas}
