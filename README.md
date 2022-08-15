@@ -22,8 +22,10 @@ How to run:
 
 ```
   cd pictionary-server
-  npm install
-  npm start
+  make env // creates a .env file
+  // ^ set your mongoDB host in this .env file
+  make install // installs npm dependencies
+  make run // starts server
 ```
 
 3. In a different terminal,

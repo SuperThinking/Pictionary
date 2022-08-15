@@ -1,13 +1,31 @@
-const express = require("express");
-const { words } = require("./words");
-const app = express();
-const server = require("http").createServer(app);
-const io = require("socket.io").listen(server);
-const port = 3000;
-const TURN_DURATION = 30; // 30 seconds
-const PAUSE_DURATION = 2; // 2 second pause
+import express from "express";
+import { words } from "./words.js";
+import http from "http";
+import socket from "socket.io";
+import "dotenv/config";
+import {
+  getRoom,
+  createRoom,
+  addUserToRoom,
+  removeUserFromRoom,
+  startGame,
+  updateWordAndArtistTurns,
+  increaseScore,
+  deleteRooms,
+} from "./models/rooms.js";
+import { default as mongodb } from "mongodb";
 
-var rooms = {};
+const MongoClient = mongodb.MongoClient;
+const app = express();
+const server = http.createServer(app);
+const io = socket.listen(server);
+const port = 3000;
+const TURN_DURATION = 15; // 30 seconds
+const PAUSE_DURATION = 2; // 2 second pause
+const SCORE_INC = 1;
+
+var mongoClient;
+var roomIntervalMap = {};
 
 const Status = {
   ERROR: "ERROR",
@@ -18,18 +36,13 @@ const Status = {
   WRONG: "WRONG",
 };
 
-const randomRoomGenerator = () => {
-  return `Room#${Math.floor(1000 + Math.random() * 9000)}`;
-};
-
 const getWord = () => {
   const randomIndex = Math.floor(Math.random() * words.length);
   return words[randomIndex];
 };
 
-const getArtistId = (roomId) => {
+const getArtistId = (users) => {
   // Get the user with the least turns
-  const users = rooms[roomId]["users"];
   let turns = users[0]["turns"];
   let index = 0;
   for (let i = 1; i < users.length; i++) {
@@ -38,8 +51,16 @@ const getArtistId = (roomId) => {
       index = i;
     }
   }
-  rooms[roomId]["users"][index]["turns"] += 1;
-  return rooms[roomId]["users"][index]["id"];
+  return users[index]["id"];
+};
+
+const resetRooms = async (roomID, username) => {
+  // Small hack to delete rooms collection :p
+  if (
+    username === process.env.RESET_USERNAME &&
+    roomID === process.env.RESET_ROOM_ID
+  )
+    await deleteRooms(mongoClient, "-", true);
 };
 
 const createEvent = (status, payload) => {
@@ -48,28 +69,7 @@ const createEvent = (status, payload) => {
 
 const createUser = (id, username, roomId) => {
   const user = { username: username, score: 0, id, turns: 0 };
-  rooms[roomId]["users"].push(user);
-  console.log(`${username} joined ${roomId}`);
   return user;
-};
-
-const createRoom = (roomId, username) => {
-  console.log(`${username} created ${roomId}`);
-  rooms[roomId] = {
-    users: [],
-    word: null,
-    artistId: null,
-    hasStarted: false,
-    timer: null,
-  };
-};
-
-const removeUser = (id, roomId) => {
-  const index = rooms[roomId]["users"].findIndex((user) => user.id === id);
-  if (index !== -1) {
-    console.log(`${rooms[roomId]["users"][index].username} left ${roomId}`);
-    return rooms[roomId]["users"].splice(index, 1)[0];
-  }
 };
 
 io.on("connection", (socket) => {
@@ -81,79 +81,86 @@ io.on("connection", (socket) => {
   });
 
   // START GAME
-  socket.on("START_GAME", ({ roomId }) => {
-    rooms[roomId]["hasStarted"] = true;
+  socket.on("START_GAME", async ({ roomId }) => {
+    await startGame(mongoClient, roomId);
     io.to(roomId).emit(
       "START_GAME",
       createEvent(Status.SUCCESS, "Starting Game!")
     );
+
+    const startNextTurn = async (room) => {
+      const word = getWord();
+      const artistID = getArtistId(room.users);
+      await updateWordAndArtistTurns(mongoClient, room.roomID, word, artistID);
+      io.to(room.roomID).emit("DRAW", { eventName: "CLEAR_BOARD" });
+      io.to(room.roomID).emit("TURN", {
+        word,
+        id: artistID,
+        turnInterval: TURN_DURATION,
+      });
+    };
+
+    const room = await getRoom(mongoClient, roomId);
+    if (room.timer === null) {
+      const intervalID = setInterval(async () => {
+        const room = await getRoom(mongoClient, roomId);
+        if (!room || room.users.length == 0) {
+          console.log(
+            `Deleting & CLearing Interval for ${roomId} | ${roomIntervalMap[roomId]}`
+          );
+          clearInterval(roomIntervalMap[roomId]);
+          deleteRooms(roomId);
+        }
+        await new Promise((r) => setTimeout(r, PAUSE_DURATION));
+        await startNextTurn(room);
+      }, (TURN_DURATION + PAUSE_DURATION) * 1000);
+      roomIntervalMap[room.roomID] = intervalID; // this id is not an int but an object and can't be strigified
+    }
+    await startNextTurn(room);
   });
 
   // TAKES CARE OF TURNS AND GENERATE WORDS
-  socket.on("TURN", ({ roomId }) => {
-    if (rooms[roomId].timer === null) {
-      rooms[roomId].timer = setInterval(async () => {
-        io.to(roomId).emit("CLEAR_INTERVAL");
-        await new Promise((r) => setTimeout(r, PAUSE_DURATION));
-        const index = rooms[roomId]["users"].findIndex(
-          (user) => user.id === socket.id
-        );
-        const word = getWord();
-        const id = getArtistId(roomId);
-        rooms[roomId]["word"] = word;
-        io.to(roomId).emit("TURN", {
-          word,
-          id,
-          turnInterval: TURN_DURATION,
-        });
-      }, (TURN_DURATION + PAUSE_DURATION) * 1000);
-    }
-    const index = rooms[roomId]["users"].findIndex(
-      (user) => user.id === socket.id
-    );
-    const word = getWord();
-    const id = getArtistId(roomId);
-    rooms[roomId]["word"] = word;
-    io.to(roomId).emit("TURN", {
-      word,
-      id,
-      turnInterval: TURN_DURATION,
-    });
-  });
+  socket.on("TURN", async ({ roomId }) => {});
 
   // TAKES CARE OF GUESSES AND SCORES
-  socket.on("GUESS", ({ roomId, guess }) => {
+  socket.on("GUESS", async ({ roomId, guess }) => {
     // Can also be moved to client as the client is aware of the word
-    const index = rooms[roomId]["users"].findIndex(
-      (user) => user.id === socket.id
-    );
-    if (guess.toLowerCase() === rooms[roomId]["word"].toLowerCase()) {
-      rooms[roomId]["users"][index]["score"] += 1;
+    const room = await getRoom(mongoClient, roomId);
+    if (guess.toLowerCase() === room.word.toLowerCase()) {
+      const user = await increaseScore(
+        mongoClient,
+        roomId,
+        socket.id,
+        SCORE_INC
+      );
       socket.emit(
         "GUESS",
         createEvent(Status.SUCCESS, {
-          score: rooms[roomId]["users"][index]["score"],
+          score: user.score,
         })
       );
     } else {
+      const index = room.users.findIndex((user) => user.id === socket.id);
       socket.emit(
         "GUESS",
         createEvent(Status.WRONG, {
-          score: rooms[roomId]["users"][index]["score"],
+          score: room.users[index].score,
         })
       );
     }
   });
 
   // CREATE ROOM
-  socket.on("CREATE_ROOM", ({ roomId, username }) => {
-    if (roomId in rooms) {
+  socket.on("CREATE_ROOM", async ({ roomId, username }) => {
+    resetRooms(roomId, username);
+    const room = await getRoom(mongoClient, roomId);
+    if (room) {
       socket.emit(
         roomId,
         createEvent(Status.ERROR, "Room with this id already exists")
       );
     } else {
-      createRoom(roomId, username);
+      await createRoom(mongoClient, roomId, username);
       socket.emit(
         roomId,
         createEvent(Status.SUCCESS, "Room created successfully")
@@ -162,13 +169,14 @@ io.on("connection", (socket) => {
   });
 
   // CHECK IF ROOM EXISTS BEFORE JOINING
-  socket.on("ROOM_EXISTS", ({ roomId }) => {
-    if (roomId in rooms && rooms[roomId]["hasStarted"] != true) {
+  socket.on("ROOM_EXISTS", async ({ roomId }) => {
+    const room = await getRoom(mongoClient, roomId);
+    if (room && room.hasStarted != true) {
       socket.emit(
         roomId,
         createEvent(Status.SUCCESS, "Connecting you to room")
       );
-    } else if (!(roomId in rooms)) {
+    } else if (!room) {
       socket.emit(
         roomId,
         createEvent(Status.ROOM_404, `Room with this id does not exist`)
@@ -182,9 +190,11 @@ io.on("connection", (socket) => {
   });
 
   // JOIN ROOM
-  socket.on("JOIN_ROOM", ({ roomId, username }) => {
-    if (roomId in rooms && rooms[roomId]["hasStarted"] != true) {
+  socket.on("JOIN_ROOM", async ({ roomId, username }) => {
+    const room = await getRoom(mongoClient, roomId);
+    if (room && room.hasStarted != true) {
       const user = createUser(socket.id, username, roomId);
+      const updatedRoom = await addUserToRoom(mongoClient, user, roomId);
       socket.join(roomId);
 
       // Send sender success event
@@ -195,7 +205,7 @@ io.on("connection", (socket) => {
         "USERS",
         createEvent(Status.NEW_USER, {
           roomId: roomId,
-          users: rooms[roomId]["users"],
+          users: updatedRoom.users,
         })
       );
     } else {
@@ -210,22 +220,36 @@ io.on("connection", (socket) => {
   });
 
   // LEAVE ROOM
-  socket.on("LEAVE_ROOM", ({ roomId }) => {
-    removeUser(socket.id, roomId);
+  socket.on("LEAVE_ROOM", async ({ roomId }) => {
+    const room = await removeUserFromRoom(mongoClient, socket.id, roomId);
     socket.leave(roomId);
     io.to(roomId).emit(
       "USERS",
       createEvent(Status.USER_LEFT_ROOM, {
         roomId: roomId,
-        users: rooms[roomId]["users"],
+        users: room.users,
       })
     );
-    // Delete Room if no user exists
-    if (rooms[roomId]["users"].length === 0) {
-      if (rooms[roomId].timer != null) clearInterval(rooms[roomId].timer);
-      delete rooms[roomId];
+    // Clear room turn interval
+    if (room.users.length === 0) {
+      if (room.roomID in roomIntervalMap) {
+        console.log(
+          `CLearing Interval for ${room.roomID} | ${
+            roomIntervalMap[room.roomID]
+          }`
+        );
+        clearInterval(roomIntervalMap[room.roomID]);
+      }
     }
   });
 });
 
-server.listen(port, () => console.log("SOCKET up on port " + port));
+MongoClient.connect(process.env.MONGO_HOST, function (err, client) {
+  if (err) throw err;
+  mongoClient = client;
+  server.listen(port, () => console.log("SOCKET up on port " + port));
+});
+
+process.on("SIGINT", function () {
+  if (mongoClient) mongoClient.close();
+});

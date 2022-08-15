@@ -10,8 +10,11 @@
   "author": "Vishal Dhawan",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.0.1",
     "express": "^4.17.1",
+    "mongodb": "^4.8.1",
     "nodemon": "^2.0.4",
     "socket.io": "^2.3.0"
-  }
+  },
+  "type": "module"
 }
