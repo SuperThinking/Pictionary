@@ -1,4 +1,4 @@
-exports.words = [
+export const words = [
   "Apple",
   "Strawberry",
   "Toothbrush",
