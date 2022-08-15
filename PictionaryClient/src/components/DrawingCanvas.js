@@ -35,14 +35,15 @@ export const DrawingCanvas = ({navigation, route}) => {
   }, []);
 
   useEffect(() => {
+    let timer = null;
     if (remainingTime && remainingTime > 0) {
-      const timer = setInterval(() => {
+      timer = setInterval(() => {
         setRemainingTime((time) => time - 1);
       }, 1000);
-      return () => {
-        clearInterval(timer);
-      };
     }
+    return () => {
+      clearInterval(timer);
+    };
   }, [remainingTime]);
 
   useEffect(() => {
@@ -54,17 +55,15 @@ export const DrawingCanvas = ({navigation, route}) => {
       } else {
         setIsDrawing(false);
       }
-      setGameConfig({...gameConfig, word: word, totalDuration: turnInterval});
-      clearBoard();
-      setCurrentPath([]);
-      setCurrentPathId(0);
+      setGameConfig((prev) => ({
+        ...prev,
+        word: word,
+        totalDuration: turnInterval,
+      }));
     });
-  }, [socket]);
-
-  useEffect(() => {
-    socket.on('RESET_INTERVAL', () => {
-      clearInterval();
-    });
+    return () => {
+      socket.removeAllListeners('TURN');
+    };
   }, [socket]);
 
   useEffect(() => {
@@ -75,17 +74,22 @@ export const DrawingCanvas = ({navigation, route}) => {
       } else {
         Alert.alert(`NOPE, TRY AGAIN!`);
       }
-      setGameConfig({...gameConfig, score: payload.score});
+      setGameConfig((prev) => ({...prev, score: payload.score}));
     });
+    return () => {
+      socket.removeAllListeners('GUESS');
+    };
   }, [socket]);
 
   // Drawing Events Sub.
   useEffect(() => {
-    if (!isDrawing) {
-      socket.on('DRAW', (event) => {
+    socket.on('DRAW', (event) => {
+      if (!isDrawing || event.eventName === DrawingEvents.CLEAR_BOARD)
         actionBasedOnEvents(event);
-      });
-    }
+    });
+    return () => {
+      socket.removeAllListeners('DRAW');
+    };
   }, [socket]);
 
   useEffect(() => {
@@ -137,13 +141,15 @@ export const DrawingCanvas = ({navigation, route}) => {
     switch (event.eventName) {
       case DrawingEvents.CLEAR_BOARD: {
         canvas.current.clear();
+        setCurrentPath([]);
+        setCurrentPathId(0);
         setPathIds([]);
         return;
       }
       case DrawingEvents.START_DRAWING: {
         setCurrentPathId(event.payload.pathId);
         setCurrentPath([event.payload.xy]);
-        setPathIds((pathIds) => [...pathIds, event.payload.currentPathId]);
+        setPathIds((pathIds) => [...pathIds, event.payload.pathId]);
         return;
       }
       case DrawingEvents.DRAWING: {
@@ -164,11 +170,8 @@ export const DrawingCanvas = ({navigation, route}) => {
   };
 
   const clearBoard = () => {
-    canvas.current.clear();
+    actionBasedOnEvents({eventName: DrawingEvents.CLEAR_BOARD});
     createSocketEvent(DrawingEvents.CLEAR_BOARD, {});
-    // Move to a cleanup method
-    setPathIds([]);
-    setCurrentPathId(0);
   };
 
   const drawStartEvent = (x, y) => {

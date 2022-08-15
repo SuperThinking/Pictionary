@@ -74,9 +74,14 @@ export const WaitingRoom = ({navigation, route}) => {
           );
         })}
       </View>
-      <TouchableOpacity onPress={startGame} style={styles.button}>
-        <Text style={styles.text}>Start Game</Text>
-      </TouchableOpacity>
+      {connectedUsers.length > 1 && connectedUsers[0].id === socket.id && (
+        <TouchableOpacity
+          onPress={startGame}
+          style={styles.button}
+          disabled={connectedUsers.length === 0}>
+          <Text style={styles.text}>Start Game</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
