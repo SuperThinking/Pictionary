@@ -38,6 +38,4 @@ How to run:
 
 Download APK : [Download](apk/Pictionary.apk)
 
-##### Currently no DB is being used and everything is being done in memory (Reload the backend and whooosh)
-
 ###### PS: Might have bugs, will try to resolve them in my free time :)
